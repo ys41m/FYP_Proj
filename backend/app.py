@@ -1,127 +1,137 @@
-# from flask import Flask, request, jsonify
-# import tensorflow as tf
-# import cv2
-# import numpy as np
-# import firebase_admin
-# from firebase_admin import credentials, firestore
-# import firebase_admin
-# from firebase_admin import credentials, firestore
-
-# # Load the Firebase credentials
-# cred = credentials.Certificate("serviceAccountKey.json")
-# firebase_admin.initialize_app(cred)
-
-# # Initialize Firestore database
-# db = firestore.client()
-
-
-# app = Flask(__name__)
-
-# # Initialize Firebase
-# cred = credentials.Certificate("path/to/serviceAccountKey.json")  # Replace with your actual path
-# firebase_admin.initialize_app(cred)
-# db = firestore.client()
-
-# @app.route('/analyze', methods=['POST'])
-# def analyze():
-#     video_file = request.files['video']
-    
-#     # TODO: Process video using TensorFlow & OpenPose (future implementation)
-#     analysis_results = {"message": "Video received for AI processing"}
-
-#     return jsonify(analysis_results)
-
-# if __name__ == '__main__':
-#     app.run(debug=True, port=5000)
-
 from flask import Flask, request, jsonify
-import tensorflow as tf
-import cv2
-import numpy as np
-import firebase_admin
-from firebase_admin import credentials, firestore, storage
+from flask_cors import CORS
 import os
+import uuid
 
 app = Flask(__name__)
+CORS(app)
 
-# Load Firebase Credentials
-cred = credentials.Certificate("serviceAccountKey.json")
-firebase_admin.initialize_app(cred, {"storageBucket": "your-project-id.appspot.com"})  # Replace with your actual Firebase storage bucket
+UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# Initialise Firestore Database
-db = firestore.client()
-bucket = storage.bucket()
+MAX_VIDEO_DURATION_SECONDS = 120  # 2 minutes
 
-# Upload Video Route
-@app.route('/upload', methods=['POST'])
-def upload_video():
-    if 'video' not in request.files:
-        return jsonify({"error": "No video file uploaded"}), 400
+# Lazy-load heavy ML modules to speed up startup
+_model = None
 
-    video_file = request.files['video']
-    filename = video_file.filename
-    file_path = os.path.join("uploads", filename)
-    
-    # Save video temporarily
-    os.makedirs("uploads", exist_ok=True)
-    video_file.save(file_path)
-    
-    # Upload video to Firebase Storage
-    blob = bucket.blob(f"videos/{filename}")
-    blob.upload_from_filename(file_path)
-    blob.make_public()
-    video_url = blob.public_url
 
-    # Save metadata to Firestore
-    video_doc = db.collection("videos").document()
-    video_doc.set({
-        "filename": filename,
-        "video_url": video_url
-    })
+def _get_model():
+    global _model
+    if _model is None:
+        from move_classifier import load_model
+        _model = load_model()  # Returns None if no trained model yet
+    return _model
 
-    # Remove temporary file
-    os.remove(file_path)
 
-    return jsonify({"message": "Video uploaded successfully!", "video_url": video_url})
-
-# ✅ AI Analysis Route (Pose Detection)
-@app.route('/analyze', methods=['POST'])
-def analyze_video():
-    if 'video' not in request.files:
-        return jsonify({"error": "No video file uploaded"}), 400
-
-    video_file = request.files['video']
-    filename = video_file.filename
-    file_path = os.path.join("uploads", filename)
-
-    # Save video temporarily
-    os.makedirs("uploads", exist_ok=True)
-    video_file.save(file_path)
-
-    # 🔥 Process Video with AI (TODO: OpenPose Integration)
-    analysis_results = process_video(file_path)
-
-    # Save AI results to Firestore
-    analysis_doc = db.collection("analysis").document()
-    analysis_doc.set({
-        "filename": filename,
-        "results": analysis_results
-    })
-
-    # Remove temporary file
-    os.remove(file_path)
-
-    return jsonify({"message": "Video analyzed successfully!", "results": analysis_results})
-
-# ✅ AI Processing Function (Placeholder)
-def process_video(video_path):
-    # TODO: Integrate OpenPose and TensorFlow AI model for analysis
-    return {"footwork": "Good", "defense": "Needs improvement", "punch_accuracy": "85%"}
-
-# ✅ Test Route
-@app.route('/', methods=['GET'])
+@app.route("/", methods=["GET"])
 def home():
-    return jsonify({"message": "StrikeStream Backend is Running!"})
+    return jsonify({"message": "BoxAnalytics API is running", "version": "1.0.0"})
 
-if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+
+@app.route("/analyze", methods=["POST"])
+def analyze_video():
+    """Upload and analyze a boxing video.
+
+    Accepts a video file (up to 2 minutes), runs pose estimation,
+    move classification, and returns a full boxing analysis.
+    """
+    if "video" not in request.files:
+        return jsonify({"error": "No video file provided. Send a 'video' field."}), 400
+
+    video_file = request.files["video"]
+    if not video_file.filename:
+        return jsonify({"error": "Empty filename"}), 400
+
+    # Save temporarily
+    ext = os.path.splitext(video_file.filename)[1] or ".mp4"
+    temp_filename = f"{uuid.uuid4().hex}{ext}"
+    temp_path = os.path.join(UPLOAD_DIR, temp_filename)
+
+    try:
+        video_file.save(temp_path)
+
+        # Validate duration
+        import cv2
+        cap = cv2.VideoCapture(temp_path)
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30
+        frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+        duration = frame_count / fps
+        cap.release()
+
+        if duration > MAX_VIDEO_DURATION_SECONDS:
+            return jsonify({
+                "error": f"Video too long ({duration:.1f}s). Maximum is {MAX_VIDEO_DURATION_SECONDS}s (2 minutes)."
+            }), 400
+
+        # Extract pose landmarks
+        from pose_estimator import extract_landmarks_from_video
+        all_landmarks = extract_landmarks_from_video(temp_path, sample_fps=10)
+
+        if not all_landmarks:
+            return jsonify({
+                "error": "No human poses detected in the video. Ensure the person is visible."
+            }), 422
+
+        # Classify moves
+        from move_classifier import predict_moves
+        model = _get_model()
+        move_predictions = predict_moves(all_landmarks, model=model)
+
+        # Run full analysis
+        from boxing_analyzer import analyze_sequence
+        results = analyze_sequence(all_landmarks, move_predictions)
+
+        return jsonify({
+            "success": True,
+            "duration_seconds": round(duration, 1),
+            "analysis": results,
+        })
+
+    except Exception as e:
+        return jsonify({"error": f"Analysis failed: {str(e)}"}), 500
+
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+
+@app.route("/presets", methods=["GET"])
+def get_presets():
+    """Return all available fighter style presets."""
+    from fighter_presets import get_preset_summary_list
+    return jsonify({"presets": get_preset_summary_list()})
+
+
+@app.route("/presets/<fighter_key>", methods=["GET"])
+def get_preset_detail(fighter_key):
+    """Return detailed info for a specific fighter preset."""
+    from fighter_presets import get_preset
+    preset = get_preset(fighter_key)
+    if not preset:
+        return jsonify({"error": f"Unknown fighter: {fighter_key}"}), 404
+    return jsonify({"preset": preset})
+
+
+@app.route("/train", methods=["POST"])
+def trigger_training():
+    """Trigger model training. Body can include {"synthetic": true} to use synthetic data."""
+    data = request.get_json(silent=True) or {}
+    use_synthetic = data.get("synthetic", True)
+    epochs = data.get("epochs", 50)
+
+    from train_model import train
+    try:
+        model, history = train(use_synthetic=use_synthetic, epochs=epochs)
+        global _model
+        _model = model
+        return jsonify({
+            "success": True,
+            "message": "Model trained successfully",
+            "final_accuracy": float(history.history["val_accuracy"][-1]),
+        })
+    except Exception as e:
+        return jsonify({"error": f"Training failed: {str(e)}"}), 500
+
+
+if __name__ == "__main__":
+    app.run(debug=True, host="0.0.0.0", port=5000)

@@ -1,21 +1,32 @@
 {
   "expo": {
-    "name": "frontend",
-    "slug": "frontend",
+    "name": "BoxAnalytics",
+    "slug": "box-analytics",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "myapp",
-    "userInterfaceStyle": "automatic",
+    "scheme": "boxanalytics",
+    "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "BoxAnalytics needs camera access to record boxing clips for analysis.",
+        "NSPhotoLibraryUsageDescription": "BoxAnalytics needs photo library access to select boxing clips for analysis.",
+        "NSMicrophoneUsageDescription": "BoxAnalytics needs microphone access when recording video."
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
-      }
+        "backgroundColor": "#0A0A0F"
+      },
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "RECORD_AUDIO"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -30,7 +41,14 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff"
+          "backgroundColor": "#0A0A0F"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "BoxAnalytics needs access to your photos to select boxing clips.",
+          "cameraPermission": "BoxAnalytics needs camera access to record boxing clips."
         }
       ]
     ],

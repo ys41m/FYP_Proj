@@ -1,16 +1,4 @@
-import React from "react";
-import { NavigationContainer } from "@react-navigation/native";
-import { createStackNavigator } from "@react-navigation/stack";
-import UploadScreen from "./app/UploadScreen";
-
-const Stack = createStackNavigator();
-
-export default function App() {
-  return (
-    <NavigationContainer>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="Upload" component={UploadScreen} />
-      </Stack.Navigator>
-    </NavigationContainer>
-  );
-}
+// This file is not used when expo-router is the entry point.
+// Routing is handled by the app/ directory structure.
+// See app/_layout.tsx for the root layout.
+export { default } from "expo-router/entry";
