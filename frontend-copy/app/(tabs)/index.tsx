@@ -17,7 +17,7 @@ export default function HomeScreen() {
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.hero}>
         <Ionicons name="fitness" size={64} color={colors.primary} />
-        <Text style={styles.title}>BoxAnalytics</Text>
+        <Text style={styles.title}>Strike Stream</Text>
         <Text style={styles.subtitle}>
           AI-Powered Boxing Analysis
         </Text>

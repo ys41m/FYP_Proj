@@ -1,8 +1,12 @@
-import cv2
-import mediapipe as mp
-import numpy as np
+"""
+Pose estimation utilities.
 
-mp_pose = mp.solutions.pose
+Provides shared functions for computing boxing angles, stance detection,
+and frame features. These are used by both the legacy MediaPipe pipeline
+and the new YOLOv8-Pose multi-person pipeline.
+"""
+
+import numpy as np
 
 
 LANDMARK_NAMES = [
@@ -44,64 +48,6 @@ def calculate_angle(a, b, c):
     angle = np.degrees(np.arccos(np.clip(cosine, -1.0, 1.0)))
     return angle
 
-
-def extract_landmarks_from_frame(frame, pose):
-    """Extract 33 pose landmarks from a single frame.
-    Returns array of shape (33, 4) — x, y, z, visibility per landmark.
-    Returns None if no pose detected.
-    """
-    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    results = pose.process(rgb)
-    if not results.pose_landmarks:
-        return None
-    landmarks = []
-    for lm in results.pose_landmarks.landmark:
-        landmarks.append([lm.x, lm.y, lm.z, lm.visibility])
-    return np.array(landmarks, dtype=np.float32)
-
-
-def extract_landmarks_from_video(video_path, sample_fps=10):
-    """Extract pose landmarks from all sampled frames in a video.
-
-    Args:
-        video_path: Path to the video file.
-        sample_fps: Target frames per second to sample.
-
-    Returns:
-        List of (frame_index, landmarks_array) tuples.
-        Each landmarks_array has shape (33, 4).
-    """
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        raise ValueError(f"Cannot open video: {video_path}")
-
-    video_fps = cap.get(cv2.CAP_PROP_FPS)
-    if video_fps <= 0:
-        video_fps = 30.0
-    frame_interval = max(1, int(video_fps / sample_fps))
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-    all_landmarks = []
-    frame_idx = 0
-
-    with mp_pose.Pose(
-        static_image_mode=False,
-        model_complexity=1,
-        min_detection_confidence=0.5,
-        min_tracking_confidence=0.5
-    ) as pose:
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
-                break
-            if frame_idx % frame_interval == 0:
-                lm = extract_landmarks_from_frame(frame, pose)
-                if lm is not None:
-                    all_landmarks.append((frame_idx, lm))
-            frame_idx += 1
-
-    cap.release()
-    return all_landmarks
 
 
 def compute_boxing_angles(landmarks):

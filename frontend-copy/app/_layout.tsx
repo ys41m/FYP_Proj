@@ -16,6 +16,13 @@ export default function RootLayout() {
       >
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen
+          name="analysis/select-fighter"
+          options={{
+            title: "Select Fighter",
+            presentation: "modal",
+          }}
+        />
+        <Stack.Screen
           name="analysis/[id]"
           options={{
             title: "Analysis Results",

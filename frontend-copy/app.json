@@ -1,19 +1,19 @@
 {
   "expo": {
-    "name": "BoxAnalytics",
-    "slug": "box-analytics",
+    "name": "Strike Stream",
+    "slug": "strike-stream",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "boxanalytics",
+    "scheme": "strikestream",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSCameraUsageDescription": "BoxAnalytics needs camera access to record boxing clips for analysis.",
-        "NSPhotoLibraryUsageDescription": "BoxAnalytics needs photo library access to select boxing clips for analysis.",
-        "NSMicrophoneUsageDescription": "BoxAnalytics needs microphone access when recording video."
+        "NSCameraUsageDescription": "Strike Stream needs camera access to record boxing clips for analysis.",
+        "NSPhotoLibraryUsageDescription": "Strike Stream needs photo library access to select boxing clips for analysis.",
+        "NSMicrophoneUsageDescription": "Strike Stream needs microphone access when recording video."
       }
     },
     "android": {
@@ -47,8 +47,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "BoxAnalytics needs access to your photos to select boxing clips.",
-          "cameraPermission": "BoxAnalytics needs camera access to record boxing clips."
+          "photosPermission": "Strike Stream needs access to your photos to select boxing clips.",
+          "cameraPermission": "Strike Stream needs camera access to record boxing clips."
         }
       ]
     ],

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import {
   View,
   Text,
@@ -7,24 +7,42 @@ import {
   ActivityIndicator,
   Alert,
   ScrollView,
+  Platform,
+  TextInput,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { Video, ResizeMode } from "expo-av";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "@/lib/theme";
-import { analyzeVideo, type Analysis } from "@/lib/api";
+import { analyzeVideo, analyzeVideoUrl } from "@/lib/api";
+import { setSessionResponse } from "@/lib/state";
 
 const MAX_DURATION = 120; // 2 minutes in seconds
 
+type SourceMode = "file" | "url";
+
 export default function UploadScreen() {
   const router = useRouter();
+  const [sourceMode, setSourceMode] = useState<SourceMode>("file");
   const [videoUri, setVideoUri] = useState<string | null>(null);
+  const [videoUrl, setVideoUrl] = useState("");
   const [analyzing, setAnalyzing] = useState(false);
+  const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+
+  // Web file input ref
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const pickVideo = async () => {
     setError(null);
+
+    if (Platform.OS === "web") {
+      // On web, trigger the hidden file input
+      fileInputRef.current?.click();
+      return;
+    }
+
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
       Alert.alert("Permission needed", "Please grant access to your media library.");
@@ -48,8 +66,22 @@ export default function UploadScreen() {
     }
   };
 
+  const handleWebFileChange = (event: any) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      const url = URL.createObjectURL(file);
+      setVideoUri(url);
+    }
+  };
+
   const recordVideo = async () => {
     setError(null);
+
+    if (Platform.OS === "web") {
+      Alert.alert("Not available", "Recording is not supported on web. Please choose a video file.");
+      return;
+    }
+
     const permission = await ImagePicker.requestCameraPermissionsAsync();
     if (!permission.granted) {
       Alert.alert("Permission needed", "Please grant camera access.");
@@ -69,21 +101,44 @@ export default function UploadScreen() {
   };
 
   const handleAnalyze = async () => {
-    if (!videoUri) return;
+    const isUrl = sourceMode === "url";
+    if (!isUrl && !videoUri) return;
+    if (isUrl && !videoUrl.trim()) return;
+
     setAnalyzing(true);
+    setProgress(0);
     setError(null);
 
     try {
-      const response = await analyzeVideo(videoUri);
-      // Store result and navigate to analysis screen
-      // Using global state for simplicity (in production, use context or state management)
-      (global as any).__lastAnalysis = response.analysis;
-      (global as any).__lastDuration = response.duration_seconds;
-      router.push("/analysis/latest");
+      const response = isUrl
+        ? await analyzeVideoUrl(videoUrl.trim(), (pct) => setProgress(pct))
+        : await analyzeVideo(videoUri!, (pct) => setProgress(pct));
+
+      // Store session response in state
+      setSessionResponse(response);
+
+      // If only 1 fighter detected, skip fighter selection
+      if (response.fighter_count === 1) {
+        router.push({
+          pathname: "/analysis/[id]",
+          params: {
+            id: "result",
+            session_id: response.session_id,
+            fighter_id: response.fighters[0].id,
+          },
+        });
+      } else {
+        // Multiple fighters — go to selection screen
+        router.push({
+          pathname: "/analysis/select-fighter",
+          params: { session_id: response.session_id },
+        });
+      }
     } catch (err: any) {
       setError(err.message || "Analysis failed. Check your connection and try again.");
     } finally {
       setAnalyzing(false);
+      setProgress(0);
     }
   };
 
@@ -91,44 +146,130 @@ export default function UploadScreen() {
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.header}>Analyze Your Boxing</Text>
       <Text style={styles.subheader}>
-        Upload a sparring clip or fight footage (max 2 minutes)
+        Upload a sparring clip, fight footage, or paste a YouTube link (max 2 minutes).
+        We'll track all fighters and let you choose who you are after.
       </Text>
 
-      <View style={styles.buttonRow}>
-        <TouchableOpacity style={styles.pickButton} onPress={pickVideo}>
-          <Ionicons name="folder-open" size={28} color={colors.white} />
-          <Text style={styles.pickButtonText}>Choose Video</Text>
+      {/* Source mode toggle */}
+      <View style={styles.modeToggle}>
+        <TouchableOpacity
+          style={[styles.modeTab, sourceMode === "file" && styles.modeTabActive]}
+          onPress={() => setSourceMode("file")}
+        >
+          <Ionicons
+            name="cloud-upload"
+            size={18}
+            color={sourceMode === "file" ? colors.white : colors.textMuted}
+          />
+          <Text
+            style={[styles.modeTabText, sourceMode === "file" && styles.modeTabTextActive]}
+          >
+            Upload File
+          </Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.pickButton, { backgroundColor: colors.accent }]}
-          onPress={recordVideo}
+          style={[styles.modeTab, sourceMode === "url" && styles.modeTabActive]}
+          onPress={() => setSourceMode("url")}
         >
-          <Ionicons name="videocam" size={28} color={colors.white} />
-          <Text style={styles.pickButtonText}>Record</Text>
+          <Ionicons
+            name="link"
+            size={18}
+            color={sourceMode === "url" ? colors.white : colors.textMuted}
+          />
+          <Text
+            style={[styles.modeTabText, sourceMode === "url" && styles.modeTabTextActive]}
+          >
+            Paste URL
+          </Text>
         </TouchableOpacity>
       </View>
 
-      {videoUri && (
-        <View style={styles.previewContainer}>
-          <Video
-            source={{ uri: videoUri }}
-            style={styles.videoPreview}
-            useNativeControls
-            resizeMode={ResizeMode.CONTAIN}
-            isLooping={false}
-          />
+      {sourceMode === "file" ? (
+        <>
+          {/* Hidden web file input */}
+          {Platform.OS === "web" && (
+            <input
+              ref={fileInputRef as any}
+              type="file"
+              accept="video/*"
+              style={{ display: "none" }}
+              onChange={handleWebFileChange}
+            />
+          )}
 
-          <TouchableOpacity
-            style={styles.clearButton}
-            onPress={() => {
-              setVideoUri(null);
-              setError(null);
-            }}
-          >
-            <Ionicons name="close-circle" size={20} color={colors.textMuted} />
-            <Text style={styles.clearText}>Remove</Text>
-          </TouchableOpacity>
+          {/* Video source buttons */}
+          <View style={styles.buttonRow}>
+            <TouchableOpacity style={styles.pickButton} onPress={pickVideo}>
+              <Ionicons name="folder-open" size={28} color={colors.white} />
+              <Text style={styles.pickButtonText}>Choose Video</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.pickButton, { backgroundColor: colors.accent }]}
+              onPress={recordVideo}
+            >
+              <Ionicons name="videocam" size={28} color={colors.white} />
+              <Text style={styles.pickButtonText}>Record</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Video preview */}
+          {videoUri && (
+            <View style={styles.previewContainer}>
+              {Platform.OS === "web" ? (
+                <video
+                  src={videoUri}
+                  controls
+                  style={{ width: "100%", height: 220, objectFit: "contain", backgroundColor: "#000" }}
+                />
+              ) : (
+                <Video
+                  source={{ uri: videoUri }}
+                  style={styles.videoPreview}
+                  useNativeControls
+                  resizeMode={ResizeMode.CONTAIN}
+                  isLooping={false}
+                />
+              )}
+              <TouchableOpacity
+                style={styles.clearButton}
+                onPress={() => {
+                  setVideoUri(null);
+                  setError(null);
+                }}
+              >
+                <Ionicons name="close-circle" size={20} color={colors.textMuted} />
+                <Text style={styles.clearText}>Remove</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </>
+      ) : (
+        /* URL input */
+        <View style={styles.urlSection}>
+          <TextInput
+            style={styles.urlInput}
+            placeholder="Paste a YouTube or video URL..."
+            placeholderTextColor={colors.textMuted}
+            value={videoUrl}
+            onChangeText={setVideoUrl}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+            editable={!analyzing}
+          />
+          {videoUrl.trim() !== "" && (
+            <TouchableOpacity
+              style={styles.urlClearButton}
+              onPress={() => {
+                setVideoUrl("");
+                setError(null);
+              }}
+            >
+              <Ionicons name="close-circle" size={20} color={colors.textMuted} />
+            </TouchableOpacity>
+          )}
         </View>
       )}
 
@@ -142,10 +283,17 @@ export default function UploadScreen() {
       <TouchableOpacity
         style={[
           styles.analyzeButton,
-          (!videoUri || analyzing) && styles.analyzeButtonDisabled,
+          ((sourceMode === "file" && !videoUri) ||
+            (sourceMode === "url" && !videoUrl.trim()) ||
+            analyzing) &&
+            styles.analyzeButtonDisabled,
         ]}
         onPress={handleAnalyze}
-        disabled={!videoUri || analyzing}
+        disabled={
+          (sourceMode === "file" && !videoUri) ||
+          (sourceMode === "url" && !videoUrl.trim()) ||
+          analyzing
+        }
       >
         {analyzing ? (
           <>
@@ -160,13 +308,28 @@ export default function UploadScreen() {
         )}
       </TouchableOpacity>
 
+      {/* Progress bar */}
       {analyzing && (
-        <View style={styles.progressInfo}>
+        <View style={styles.progressSection}>
+          <View style={styles.progressTrack}>
+            <View
+              style={[
+                styles.progressFill,
+                { width: `${Math.max(5, progress)}%` },
+              ]}
+            />
+          </View>
           <Text style={styles.progressText}>
-            Extracting poses and classifying moves...
+            {progress < 90
+              ? sourceMode === "url"
+                ? "Downloading and detecting fighters..."
+                : "Uploading and detecting fighters..."
+              : "Running boxing analysis..."}
           </Text>
           <Text style={styles.progressSubtext}>
-            This may take 30-60 seconds depending on video length.
+            {sourceMode === "url"
+              ? "Downloading and analysing may take 1-2 minutes."
+              : "This may take 30-60 seconds depending on video length."}
           </Text>
         </View>
       )}
@@ -177,6 +340,8 @@ export default function UploadScreen() {
         <Tip text="Good lighting helps pose detection accuracy" />
         <Tip text="Keep the camera steady (tripod recommended)" />
         <Tip text="Works with sparring, bag work, shadow boxing, or fight footage" />
+        <Tip text="Both fighters are tracked — you choose who you are after analysis" />
+        <Tip text="Paste a YouTube or direct video URL to analyse fight footage online" />
       </View>
     </ScrollView>
   );
@@ -193,7 +358,7 @@ function Tip({ text }: { text: string }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
-  content: { padding: 20 },
+  content: { padding: 20, paddingBottom: 40 },
   header: {
     fontSize: 28,
     fontWeight: "bold",
@@ -205,6 +370,56 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     marginTop: 6,
     marginBottom: 24,
+    lineHeight: 20,
+  },
+  modeToggle: {
+    flexDirection: "row",
+    backgroundColor: colors.card,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    padding: 4,
+    marginBottom: 16,
+  },
+  modeTab: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10,
+    borderRadius: 8,
+    gap: 6,
+  },
+  modeTabActive: {
+    backgroundColor: colors.primary,
+  },
+  modeTabText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: colors.textMuted,
+  },
+  modeTabTextActive: {
+    color: colors.white,
+  },
+  urlSection: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  urlInput: {
+    flex: 1,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    color: colors.text,
+    fontSize: 15,
+  },
+  urlClearButton: {
+    position: "absolute",
+    right: 12,
   },
   buttonRow: {
     flexDirection: "row",
@@ -227,7 +442,7 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
   },
   previewContainer: {
-    marginBottom: 20,
+    marginBottom: 16,
     borderRadius: 12,
     overflow: "hidden",
     backgroundColor: colors.card,
@@ -275,9 +490,22 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "bold",
   },
-  progressInfo: {
+  progressSection: {
     alignItems: "center",
     marginBottom: 20,
+  },
+  progressTrack: {
+    width: "100%",
+    height: 6,
+    backgroundColor: colors.cardBorder,
+    borderRadius: 3,
+    overflow: "hidden",
+    marginBottom: 10,
+  },
+  progressFill: {
+    height: "100%",
+    backgroundColor: colors.primary,
+    borderRadius: 3,
   },
   progressText: {
     color: colors.secondary,

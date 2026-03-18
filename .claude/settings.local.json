@@ -1,7 +1,17 @@
 {
   "permissions": {
     "allow": [
-      "WebSearch"
+      "WebSearch",
+      "Bash(npx expo:*)",
+      "Bash(python -c \":*)",
+      "Bash(npx tsc:*)",
+      "Bash(rm -rf node_modules)",
+      "Bash(npm install:*)",
+      "Bash(ls \"c:/Users/Caleb/Documents/Control Room/boxProj/FYP_Proj/frontend-copy/app/\\(tabs\\)\")",
+      "Bash(pip install:*)",
+      "Bash(python -c \"import flask; print\\(flask.__version__\\)\")",
+      "Bash(timeout 5 python -c \":*)",
+      "Bash(python -c \"import yt_dlp; print\\(yt_dlp.version.__version__\\)\")"
     ]
   }
 }

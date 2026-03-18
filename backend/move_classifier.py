@@ -2,6 +2,9 @@
 Boxing move classifier using an LSTM model trained on pose landmark sequences.
 Classifies sequences of frames into boxing moves: jabs, crosses, hooks, uppercuts,
 slips, bobs, blocks, etc.
+
+Returns predictions with confidence scores and frame indices for timestamp-aware
+coaching feedback.
 """
 
 import numpy as np
@@ -32,6 +35,9 @@ MOVE_LABELS = [
     "idle_guard",
     "footwork"
 ]
+
+PUNCH_LABELS = {"jab", "cross", "lead_hook", "rear_hook", "lead_uppercut", "rear_uppercut"}
+DEFENSE_LABELS = {"slip_left", "slip_right", "bob_and_weave", "block"}
 
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "models", "move_classifier.keras")
 
@@ -84,7 +90,11 @@ def predict_moves(all_landmarks, model=None):
         model: Optional pre-loaded keras model. If None, loads from disk.
 
     Returns:
-        List of predicted move labels, one per sliding window.
+        List of dicts with keys:
+            - label: predicted move label string
+            - confidence: float 0-1
+            - frame_idx: int, the starting frame index of this prediction window
+            - frame_end: int, the ending frame index of this prediction window
     """
     if model is None:
         model = load_model()
@@ -95,9 +105,11 @@ def predict_moves(all_landmarks, model=None):
 
     # Compute features for each frame
     features = []
-    for _, landmarks in all_landmarks:
+    frame_indices = []
+    for fidx, landmarks in all_landmarks:
         feat = compute_frame_features(landmarks)
         features.append(feat)
+        frame_indices.append(fidx)
     features = np.array(features)
 
     # Create sliding windows
@@ -110,10 +122,19 @@ def predict_moves(all_landmarks, model=None):
         pred = model.predict(window, verbose=0)
         label_idx = np.argmax(pred[0])
         confidence = float(pred[0][label_idx])
+
         if confidence > 0.4:
-            predictions.append(MOVE_LABELS[label_idx])
+            label = MOVE_LABELS[label_idx]
         else:
-            predictions.append("idle_guard")
+            label = "idle_guard"
+            confidence = 1.0 - confidence  # invert for idle
+
+        predictions.append({
+            "label": label,
+            "confidence": confidence,
+            "frame_idx": frame_indices[start],
+            "frame_end": frame_indices[min(start + SEQUENCE_LENGTH - 1, len(frame_indices) - 1)],
+        })
 
     return predictions
 
@@ -122,13 +143,14 @@ def _heuristic_classify(all_landmarks):
     """Rule-based move classification when no trained model is available.
 
     Uses joint angles and positional changes to detect basic moves.
+    Returns predictions in the same format as predict_moves.
     """
+    from pose_estimator import compute_boxing_angles, LEFT_WRIST, RIGHT_WRIST, NOSE, LEFT_ELBOW
+
     predictions = []
 
     for i in range(len(all_landmarks)):
-        _, landmarks = all_landmarks[i]
-
-        from pose_estimator import compute_boxing_angles, LEFT_WRIST, RIGHT_WRIST, NOSE
+        frame_idx, landmarks = all_landmarks[i]
 
         angles = compute_boxing_angles(landmarks)
 
@@ -143,7 +165,7 @@ def _heuristic_classify(all_landmarks):
         right_wrist_y = landmarks[RIGHT_WRIST][1]
         nose_y = landmarks[NOSE][1]
 
-        # In MediaPipe, lower Y = higher in frame
+        # In normalized coords, lower Y = higher in frame
         left_high = left_wrist_y < nose_y
         right_high = right_wrist_y < nose_y
 
@@ -158,28 +180,43 @@ def _heuristic_classify(all_landmarks):
 
         # Classification logic
         move = "idle_guard"
+        confidence = 0.6
 
         if left_extended and left_raised and left_high:
             if angles["left_shoulder"] > 80:
                 move = "jab"
+                confidence = 0.7
             else:
                 move = "lead_hook"
+                confidence = 0.65
         elif right_extended and right_raised and right_high:
             if angles["right_shoulder"] > 80:
                 move = "cross"
+                confidence = 0.7
             else:
                 move = "rear_hook"
+                confidence = 0.65
         elif left_raised and not left_extended and landmarks[LEFT_WRIST][1] < landmarks[LEFT_ELBOW][1]:
             move = "lead_uppercut"
-        elif right_raised and not right_extended and landmarks[RIGHT_WRIST][1] < landmarks[RIGHT_ELBOW][1]:
+            confidence = 0.6
+        elif right_raised and not right_extended and landmarks[RIGHT_WRIST][1] < landmarks[int(LEFT_ELBOW) + 1][1]:
             move = "rear_uppercut"
+            confidence = 0.6
         elif abs(head_dx) > 0.03:
             move = "slip_left" if head_dx < 0 else "slip_right"
+            confidence = 0.55
         elif head_dy > 0.03:
             move = "bob_and_weave"
+            confidence = 0.55
         elif left_high and right_high and not left_extended and not right_extended:
             move = "block"
+            confidence = 0.6
 
-        predictions.append(move)
+        predictions.append({
+            "label": move,
+            "confidence": confidence,
+            "frame_idx": frame_idx,
+            "frame_end": frame_idx,
+        })
 
     return predictions
