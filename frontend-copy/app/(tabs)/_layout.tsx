@@ -1,4 +1,5 @@
 import { Tabs } from "expo-router";
+import { View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "@/lib/theme";
 
@@ -14,9 +15,13 @@ export default function TabLayout() {
           height: 60,
           paddingBottom: 8,
         },
+        tabBarActiveBackgroundColor: "transparent",
         headerStyle: { backgroundColor: colors.bg },
         headerTintColor: colors.text,
-        headerTitleStyle: { fontWeight: "bold" },
+        headerTitleStyle: { fontWeight: "bold", color: colors.primary },
+        headerBackground: () => (
+          <View style={{ flex: 1, backgroundColor: colors.bg, borderBottomWidth: 1, borderBottomColor: colors.cardBorder }} />
+        ),
       }}
     >
       <Tabs.Screen
